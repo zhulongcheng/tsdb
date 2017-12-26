@@ -532,3 +532,14 @@ func TestIntersectWithMerge(t *testing.T) {
 	testutil.Ok(t, err)
 	testutil.Equals(t, []uint64{30}, res)
 }
+
+func TestReduceToEmptyPostings(t *testing.T) {
+	a := newListPostings([]uint64{1, 2, 3})
+	b := newListPostings([]uint64{2, 3, 4})
+	c := EmptyPostings()
+
+	testutil.Assert(t, Intersect(a, b, c) == EmptyPostings(), "was not empty postings")
+	testutil.Assert(t, Merge(a, b, c) != EmptyPostings(), "should not be empty postings")
+	testutil.Assert(t, Merge(c, c, c) == EmptyPostings(), "was not empty postings")
+	testutil.Assert(t, Without(c, a) == EmptyPostings(), "was not empty postings")
+}
