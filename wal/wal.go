@@ -311,7 +311,6 @@ func (w *WAL) Repair(origErr error) error {
 	if err != nil {
 		return errors.Wrap(err, "open segment")
 	}
-	defer f.Close()
 	r := NewReader(bufio.NewReader(f))
 
 	for r.Next() {
@@ -319,8 +318,11 @@ func (w *WAL) Repair(origErr error) error {
 			return errors.Wrap(err, "insert record")
 		}
 	}
-	// We expect an error here, so nothing to handle.
+	// We expect an error here from r.Err(), so nothing to handle.
 
+	if err := f.Close(); err != nil {
+		return errors.Wrap(err, "close corrupted file")
+	}
 	if err := os.Remove(tmpfn); err != nil {
 		return errors.Wrap(err, "delete corrupted segment")
 	}
