@@ -285,6 +285,13 @@ func (w *WAL) Repair(origErr error) error {
 		if s.n <= cerr.Segment {
 			continue
 		}
+		if w.segment.i == s.n {
+			// The active segment needs to be removed,
+			// close it first (Windows!).
+			if err := w.segment.Close(); err != nil {
+				return errors.Wrap(err, "close active segment")
+			}
+		}
 		if err := os.Remove(filepath.Join(w.dir, s.s)); err != nil {
 			return errors.Wrap(err, "delete segment")
 		}
