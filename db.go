@@ -116,9 +116,13 @@ type DB struct {
 	donec    chan struct{}
 	stopc    chan struct{}
 
-	// cmtx is used to control compactions and deletions.
-	cmtx               sync.Mutex
-	compactionsEnabled bool
+	// cmtx ensures that compactions and deletions don't run simultaneously.
+	cmtx sync.Mutex
+
+	// autoCompactMtx ensures that no compaction gets triggered while
+	// changing the autoCompact var.
+	autoCompactMtx sync.Mutex
+	autoCompact    bool
 }
 
 type dbMetrics struct {
@@ -128,6 +132,7 @@ type dbMetrics struct {
 	reloadsFailed        prometheus.Counter
 	compactionsTriggered prometheus.Counter
 	timeRetentionCount   prometheus.Counter
+	compactionsSkipped   prometheus.Counter
 	startTime            prometheus.GaugeFunc
 	tombCleanTimer       prometheus.Histogram
 	blocksBytes          prometheus.Gauge
@@ -173,6 +178,10 @@ func newDBMetrics(db *DB, r prometheus.Registerer) *dbMetrics {
 	m.timeRetentionCount = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "prometheus_tsdb_time_retentions_total",
 		Help: "The number of times that blocks were deleted because the maximum time limit was exceeded.",
+	})
+	m.compactionsSkipped = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "prometheus_tsdb_compactions_skipped_total",
+		Help: "Total number of skipped compactions due to disabled auto compaction.",
 	})
 	m.startTime = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "prometheus_tsdb_lowest_timestamp",
@@ -236,14 +245,14 @@ func Open(dir string, l log.Logger, r prometheus.Registerer, opts *Options) (db 
 	}
 
 	db = &DB{
-		dir:                dir,
-		logger:             l,
-		opts:               opts,
-		compactc:           make(chan struct{}, 1),
-		donec:              make(chan struct{}),
-		stopc:              make(chan struct{}),
-		compactionsEnabled: true,
-		chunkPool:          chunkenc.NewPool(),
+		dir:         dir,
+		logger:      l,
+		opts:        opts,
+		compactc:    make(chan struct{}, 1),
+		donec:       make(chan struct{}),
+		stopc:       make(chan struct{}),
+		autoCompact: true,
+		chunkPool:   chunkenc.NewPool(),
 	}
 	db.metrics = newDBMetrics(db, r)
 
@@ -310,13 +319,18 @@ func (db *DB) run() {
 		case <-db.compactc:
 			db.metrics.compactionsTriggered.Inc()
 
-			err := db.compact()
-			if err != nil {
-				level.Error(db.logger).Log("msg", "compaction failed", "err", err)
-				backoff = exponential(backoff, 1*time.Second, 1*time.Minute)
+			db.autoCompactMtx.Lock()
+			if db.autoCompact {
+				if err := db.compact(); err != nil {
+					level.Error(db.logger).Log("msg", "compaction failed", "err", err)
+					backoff = exponential(backoff, 1*time.Second, 1*time.Minute)
+				} else {
+					backoff = 0
+				}
 			} else {
-				backoff = 0
+				db.metrics.compactionsSkipped.Inc()
 			}
+			db.autoCompactMtx.Unlock()
 		case <-db.stopc:
 			return
 		}
@@ -359,11 +373,6 @@ func (a dbAppender) Commit() error {
 func (db *DB) compact() (err error) {
 	db.cmtx.Lock()
 	defer db.cmtx.Unlock()
-
-	if !db.compactionsEnabled {
-		return nil
-	}
-
 	// Check whether we have pending head blocks that are ready to be persisted.
 	// They have the highest priority.
 	for {
@@ -801,21 +810,21 @@ func (db *DB) Close() error {
 	return merr.Err()
 }
 
-// DisableCompactions disables compactions.
+// DisableCompactions disables auto compactions.
 func (db *DB) DisableCompactions() {
-	db.cmtx.Lock()
-	defer db.cmtx.Unlock()
+	db.autoCompactMtx.Lock()
+	defer db.autoCompactMtx.Unlock()
 
-	db.compactionsEnabled = false
+	db.autoCompact = false
 	level.Info(db.logger).Log("msg", "compactions disabled")
 }
 
-// EnableCompactions enables compactions.
+// EnableCompactions enables auto compactions.
 func (db *DB) EnableCompactions() {
-	db.cmtx.Lock()
-	defer db.cmtx.Unlock()
+	db.autoCompactMtx.Lock()
+	defer db.autoCompactMtx.Unlock()
 
-	db.compactionsEnabled = true
+	db.autoCompact = true
 	level.Info(db.logger).Log("msg", "compactions enabled")
 }
 
@@ -950,49 +959,6 @@ func (db *DB) CleanTombstones() (err error) {
 		}
 	}
 	return errors.Wrap(db.reload(), "reload blocks")
-}
-
-// labelNames returns all the unique label names from the Block Readers.
-func labelNames(brs ...BlockReader) (map[string]struct{}, error) {
-	labelNamesMap := make(map[string]struct{})
-	for _, br := range brs {
-		ir, err := br.Index()
-		if err != nil {
-			return nil, errors.Wrap(err, "get IndexReader")
-		}
-		names, err := ir.LabelNames()
-		if err != nil {
-			return nil, errors.Wrap(err, "LabelNames() from IndexReader")
-		}
-		for _, name := range names {
-			labelNamesMap[name] = struct{}{}
-		}
-		if err = ir.Close(); err != nil {
-			return nil, errors.Wrap(err, "close IndexReader")
-		}
-	}
-	return labelNamesMap, nil
-}
-
-// LabelNames returns all the unique label names present in the DB in sorted order.
-func (db *DB) LabelNames() ([]string, error) {
-	brs := []BlockReader{db.head}
-	for _, b := range db.Blocks() {
-		brs = append(brs, b)
-	}
-
-	labelNamesMap, err := labelNames(brs...)
-	if err != nil {
-		return nil, err
-	}
-
-	labelNames := make([]string, 0, len(labelNamesMap))
-	for name := range labelNamesMap {
-		labelNames = append(labelNames, name)
-	}
-	sort.Strings(labelNames)
-
-	return labelNames, nil
 }
 
 func isBlockDir(fi os.FileInfo) bool {
