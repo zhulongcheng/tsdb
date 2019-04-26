@@ -202,6 +202,32 @@ An offset table stores a sequence of entries that maps a list of strings to an o
 └────────────────────────────────────────────┘
 ```
 
+Every label entry holds the label name and the offset to its values in the label index section.
+
+```
+ ┌────────────────────────────────────────┐
+ │  n = 1 <1b>                            │
+ ├──────────────────────┬─────────────────┤
+ │ len(name) <uvarint>  │  name <bytes>   │
+ ├──────────────────────┴─────────────────┤
+ │  offset <uvarint64>                    │
+ └────────────────────────────────────────┘
+```
+
+Every posting entry holds the lable name/value pair and the offset to its series list in the posting section.
+
+```
+ ┌────────────────────────────────────────┐
+ │  n = 2 <1b>                            │
+ ├──────────────────────┬─────────────────┤
+ │ len(name) <uvarint>  │  name <bytes>   │
+ ├──────────────────────┴─────────────────┤
+ │ len(value) <uvarint> │  value <bytes>  │
+ ├──────────────────────┴─────────────────┤
+ │  offset <uvarint64>                    │
+ └────────────────────────────────────────┘
+```
+
 
 ### TOC
 
