@@ -153,7 +153,7 @@ For instance, a single label name with 4 different values will be encoded as:
 └────┴───┴───┴──────────────┴──────────────┴──────────────┴──────────────┴───────┘
 ```
 
-The sequence of label index sections is finalized by an [offset table](#offset-table) pointing to the beginning of each label index section for a given set of label names.
+The sequence of label index sections is finalized by an [offset table](#label-offset-entry) pointing to the beginning of each label index section for a given set of label names.
 
 ### Postings
 
@@ -175,7 +175,7 @@ Postings sections store monotonically increasing lists of series references that
 └─────────────────────────────────────────┘
 ```
 
-The sequence of postings sections is finalized by an [offset table](#offset-table) pointing to the beginning of each postings section for a given set of label names.
+The sequence of postings sections is finalized by an [offset table](#posting-offset-entry) pointing to the beginning of each postings section for a given set of label names.
 
 ### Offset Table
 
@@ -202,7 +202,7 @@ An offset table stores a sequence of entries that maps a list of strings to an o
 └────────────────────────────────────────────┘
 ```
 
-Every label entry holds the label name and the offset to its values in the label index section.
+<a name="label-offset-entry"></a>Every label entry holds the label name and the offset to its values in the label index section.
 
 ```
  ┌────────────────────────────────────────┐
@@ -214,7 +214,7 @@ Every label entry holds the label name and the offset to its values in the label
  └────────────────────────────────────────┘
 ```
 
-Every posting entry holds the lable name/value pair and the offset to its series list in the posting section.
+<a name="posting-offset-entry"></a>Every posting entry holds the lable name/value pair and the offset to its series list in the posting section.
 
 ```
  ┌────────────────────────────────────────┐
